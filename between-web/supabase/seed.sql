@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS matches (
   user_a UUID NOT NULL REFERENCES users(auth_id),
   user_b UUID NOT NULL REFERENCES users(auth_id),
   score_breakdown JSONB DEFAULT '{}', -- transparent score inputs
-  state TEXT DEFAULT 'pending' CHECK (state IN ('pending', 'mutual', 'expired', 'blocked')),
+  state TEXT DEFAULT 'pending' CHECK (state IN ('pending', 'mutual', 'continued', 'not_this_time', 'expired', 'blocked')),
   initiated_at TIMESTAMPTZ DEFAULT now(),
   expires_at TIMESTAMPTZ, -- auto-expiry of open-to-meet
   mutual_opt_in_at TIMESTAMPTZ, -- when both opted in
@@ -75,6 +75,16 @@ CREATE TABLE IF NOT EXISTS connections (
   outcome TEXT CHECK (outcome IN ('continued', 'not_this_time', 'blocked')),
   created_at TIMESTAMPTZ DEFAULT now(),
   -- RLS: only the two users in the match can see/ modify
+);
+
+-- Messages - chat messages (only after both continue)
+CREATE TABLE IF NOT EXISTS messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  match_id UUID NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES users(auth_id),
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  -- RLS: only match participants can see messages
 );
 
 -- Reports - safety reports
@@ -109,62 +119,110 @@ ALTER TABLE event_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE matches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE blocks ENABLE ROW LEVEL SECURITY;
 
 -- ---- RLS POLICIES ----
 
--- Users: only admins can see all; regular users see own row
+-- Users: users see own row
 CREATE POLICY "Users can view own profile" ON users
-  FOR SELECT USING (auth_id = gen_random_uuid());
+  FOR SELECT USING (auth_id = auth.uid());
+
+CREATE POLICY "Users can insert own profile" ON users
+  FOR INSERT WITH CHECK (auth_id = auth.uid());
 
 -- Events: users can see events they're members of + all events (no exact location)
 CREATE POLICY "Users can view accessible events" ON events
   FOR SELECT USING (
-    EXISTS (SELECT 1 FROM event_members WHERE event_id = events.id AND user_id = gen_random_uuid())
+    EXISTS (SELECT 1 FROM event_members WHERE event_id = events.id AND user_id = auth.uid())
     OR true -- all events visible, but no exact GPS
   );
 
 -- Event members: users can see their own event memberships
 CREATE POLICY "Users can view own event memberships" ON event_members
-  FOR SELECT USING (user_id = gen_random_uuid());
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "Users can insert own event memberships" ON event_members
+  FOR INSERT WITH CHECK (user_id = auth.uid());
 
 -- Preferences: users can only modify their own
 CREATE POLICY "Users can view own preferences" ON preferences
-  FOR SELECT USING (user_id = gen_random_uuid());
+  FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "Users can insert own preferences" ON preferences
+  FOR INSERT WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update own preferences" ON preferences
+  FOR UPDATE USING (user_id = auth.uid());
 
 -- Matches: users can see their own matches (either user_a or user_b)
 CREATE POLICY "Users can view own matches" ON matches
   FOR SELECT USING (
-    user_a = gen_random_uuid() OR user_b = gen_random_uuid()
+    user_a = auth.uid() OR user_b = auth.uid()
+  );
+
+CREATE POLICY "Users can insert own matches" ON matches
+  FOR INSERT WITH CHECK (
+    user_a = auth.uid() OR user_b = auth.uid()
+  );
+
+CREATE POLICY "Users can update own matches" ON matches
+  FOR UPDATE USING (
+    user_a = auth.uid() OR user_b = auth.uid()
   );
 
 -- Connections: only match participants can see
 CREATE POLICY "Users can view own connections" ON connections
   FOR SELECT USING (
-    EXISTS (SELECT 1 FROM matches WHERE id = connections.match_id AND (user_a = gen_random_uuid() OR user_b = gen_random_uuid()))
+    EXISTS (SELECT 1 FROM matches WHERE id = connections.match_id AND (user_a = auth.uid() OR user_b = auth.uid()))
+  );
+
+CREATE POLICY "Users can insert own connections" ON connections
+  FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM matches WHERE id = connections.match_id AND (user_a = auth.uid() OR user_b = auth.uid()))
+  );
+
+CREATE POLICY "Users can update own connections" ON connections
+  FOR UPDATE USING (
+    EXISTS (SELECT 1 FROM matches WHERE id = connections.match_id AND (user_a = auth.uid() OR user_b = auth.uid()))
+  );
+
+-- Messages: only match participants can see
+CREATE POLICY "Users can view own messages" ON messages
+  FOR SELECT USING (
+    EXISTS (SELECT 1 FROM matches WHERE id = messages.match_id AND (user_a = auth.uid() OR user_b = auth.uid()))
+  );
+
+CREATE POLICY "Users can insert own messages" ON messages
+  FOR INSERT WITH CHECK (
+    sender_id = auth.uid() AND
+    EXISTS (SELECT 1 FROM matches WHERE id = messages.match_id AND (user_a = auth.uid() OR user_b = auth.uid()) AND state = 'continued')
   );
 
 -- Reports: reporter can see own reports
 CREATE POLICY "Users can view own reports" ON reports
-  FOR SELECT USING (reporter_id = gen_random_uuid());
+  FOR SELECT USING (reporter_id = auth.uid());
+
+CREATE POLICY "Users can insert own reports" ON reports
+  FOR INSERT WITH CHECK (reporter_id = auth.uid());
 
 -- Blocks: users can see their own blocks
 CREATE POLICY "Users can view own blocks" ON blocks
-  FOR SELECT USING (blocker_id = gen_random_uuid());
-
--- Insert policies
-CREATE POLICY "Users can insert own profile" ON users
-  FOR INSERT WITH CHECK (auth_id = gen_random_uuid());
-
-CREATE POLICY "Users can insert own event memberships" ON event_members
-  FOR INSERT WITH CHECK (user_id = gen_random_uuid());
-
-CREATE POLICY "Users can insert own preferences" ON preferences
-  FOR INSERT WITH CHECK (user_id = gen_random_uuid());
-
-CREATE POLICY "Users can insert own reports" ON reports
-  FOR INSERT WITH CHECK (reporter_id = gen_random_uuid());
+  FOR SELECT USING (blocker_id = auth.uid());
 
 CREATE POLICY "Users can insert own blocks" ON blocks
-  FOR INSERT WITH CHECK (blocker_id = gen_random_uuid());
+  FOR INSERT WITH CHECK (blocker_id = auth.uid());
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_event_members_user_id ON event_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_event_members_event_id ON event_members(event_id);
+CREATE INDEX IF NOT EXISTS idx_preferences_user_id ON preferences(user_id);
+CREATE INDEX IF NOT EXISTS idx_matches_user_a ON matches(user_a);
+CREATE INDEX IF NOT EXISTS idx_matches_user_b ON matches(user_b);
+CREATE INDEX IF NOT EXISTS idx_matches_event_id ON matches(event_id);
+CREATE INDEX IF NOT EXISTS idx_matches_state ON matches(state);
+CREATE INDEX IF NOT EXISTS idx_connections_match_id ON connections(match_id);
+CREATE INDEX IF NOT EXISTS idx_messages_match_id ON messages(match_id);
+CREATE INDEX IF NOT EXISTS idx_blocks_blocker_id ON blocks(blocker_id);
+CREATE INDEX IF NOT EXISTS idx_reports_reporter_id ON reports(reporter_id);

@@ -11,7 +11,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useNavigate } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { dbHelpers } from "@/lib/supabase";
 import {
@@ -19,9 +19,7 @@ import {
   Card,
   CardContent,
   CardHeader,
-  Checkbox,
   Input,
-  Label,
 } from "@/components/ui";
 
 type ConversationType = 
@@ -47,7 +45,7 @@ export default function PreferencesScreen() {
   const [openToMeet, setOpenToMeet] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const navigate = useNavigate();
+  const router = useRouter();
   const [hasSession, setHasSession] = useState(false);
 
   useEffect(() => {
@@ -74,13 +72,17 @@ export default function PreferencesScreen() {
   }, []);
 
   const handleSave = async () => {
+    const { data: session } = await supabase.auth.getSession();
+    if (!session?.session?.user?.id) {
+      setError("Please sign in first");
+      return;
+    }
+
     setSaving(true);
     try {
       // Save preferences to Supabase
       await dbHelpers.updatePreferences(
-        // Get current user's auth id
-        // In a real app, we'd get this from the session
-        "current-user-id", // placeholder - will be replaced with actual session user ID
+        session.session.user.id,
         {
           conversation_types: conversationTypes,
           interests: interests,
@@ -88,10 +90,10 @@ export default function PreferencesScreen() {
         }
       );
       
-      // Navigate to next screen
-      navigate("/bridge");
-    } catch (err: any) {
-      setError(err.message || "Failed to save preferences");
+      // Navigate to matches screen
+      router.push("/matches");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save preferences");
     } finally {
       setSaving(false);
     }
@@ -107,7 +109,7 @@ export default function PreferencesScreen() {
           <p className="text-sm text-muted-foreground mb-4">
             Please sign in first to configure your preferences.
           </p>
-          <Button onClick={() => navigate("/")} className="w-full">
+          <Button onClick={() => router.push("/")} className="w-full">
             Sign in with magic link
           </Button>
         </CardContent>
@@ -127,13 +129,13 @@ export default function PreferencesScreen() {
         {error && <p className="text-sm text-destructive mb-4">{error}</p>}
         
         {/* Conversation Type */}
-        <Details>
-          <DetailsSummary className="flex items-center justify-between">
+        <details>
+          <summary className="flex items-center justify-between cursor-pointer list-none">
             <span>What kind of conversation are you open to?</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
-          </DetailsSummary>
+          </summary>
           <div className="grid grid-cols-2 gap-2 py-2">
             <label className="flex items-center gap-2 cursor-pointer">
               <Input
@@ -211,16 +213,16 @@ export default function PreferencesScreen() {
               Deep
             </label>
           </div>
-        </Details>
+        </details>
 
         {/* Interests */}
-        <Details>
-          <DetailsSummary className="flex items-center justify-between">
+        <details>
+          <summary className="flex items-center justify-between cursor-pointer list-none">
             <span>Select your interests</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
-          </DetailsSummary>
+          </summary>
           <div className="grid grid-cols-2 gap-2 pb-2">
             {/* Dynamic interest chips will go here */}
             {/* For now, showing a few examples */}
@@ -277,11 +279,11 @@ export default function PreferencesScreen() {
               />
             </label>
           </div>
-        </Details>
+        </details>
 
         {/* Vibe Descriptors (optional) */}
-        <Details>
-          <DetailsSummary className="flex items-center justify-between">
+        <details>
+          <summary className="flex items-center justify-between cursor-pointer list-none">
             <span>Optional: Vibe descriptors</span>
             <small className="text-xs text-muted-foreground">
               (e.g., creative, chill, ambitious)
@@ -289,7 +291,7 @@ export default function PreferencesScreen() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
-          </DetailsSummary>
+          </summary>
           <div className="grid grid-cols-3 gap-1 py-2">
             <label className="flex flex-col items-center gap-1 cursor-pointer p-1 border rounded hover:border-primary">
               <span>Creative</span>
@@ -370,19 +372,19 @@ export default function PreferencesScreen() {
               />
             </label>
           </div>
-        </Details>
+        </details>
 
         {/* Open to Meeting Toggle */}
-        <Details>
-          <DetailsSummary className="flex items-center justify-between">
+        <details>
+          <summary className="flex items-center justify-between cursor-pointer list-none">
             <span>Open to meeting someone</span>
             <small className="text-xs text-muted-foreground">
-              You'll see compatible people when ON
+              You&apos;ll see compatible people when ON
             </small>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
-          </DetailsSummary>
+          </summary>
           <div className="flex items-center gap-3 py-3">
             <label className="flex items-center gap-2 cursor-pointer">
               <Input
@@ -406,11 +408,11 @@ export default function PreferencesScreen() {
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            When open to meeting is ON, you'll discover compatible people 
+            When open to meeting is ON, you&apos;ll discover compatible people 
             from the same event. Your status auto-expires after 2 hours 
-            so you don't stay visible by accident.
+            so you don&apos;t stay visible by accident.
           </p>
-        </Details>
+        </details>
 
         <div className="mt-6 pt-6 border-t border-border">
           <Button 
@@ -426,3 +428,4 @@ export default function PreferencesScreen() {
     </Card>
   );
 }
+

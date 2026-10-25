@@ -10,8 +10,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useNavigate } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
+import { supabase, authHelpers } from "@/lib/supabase";
 import { dbHelpers } from "@/lib/supabase";
 import {
   Button,
@@ -19,7 +19,6 @@ import {
   CardContent,
   CardHeader,
   Input,
-  Label,
 } from "@/components/ui";
 
 export default function WelcomeScreen() {
@@ -27,7 +26,7 @@ export default function WelcomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const router = useRouter();
 
   useEffect(() => {
     // Fetch events user is registered for
@@ -42,9 +41,9 @@ export default function WelcomeScreen() {
           // User is logged in, get their events
           const myEvents = await dbHelpers.getMyEvents();
           setEvents(
-            myEvents.map((e: any) => ({
-              id: e.id,
-              name: e.name,
+            myEvents.map((e) => ({
+              id: e.events.id,
+              name: e.events.name,
             }))
           );
         }
@@ -69,9 +68,9 @@ export default function WelcomeScreen() {
     try {
       // Send magic link
       await authHelpers.signInWithMagicLink(email, "/preferences");
-      navigate("/preferences"); // Navigate after user clicks magic link
-    } catch (err: any) {
-      setError(err.message || "Failed to send magic link");
+      router.push("/preferences"); // Navigate after user clicks magic link
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send magic link");
     }
   };
 
@@ -86,7 +85,7 @@ export default function WelcomeScreen() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-6">
-            Please enter your email to continue. We'll send a magic link to sign in.
+            Please enter your email to continue. We&apos;ll send a magic link to sign in.
           </p>
           <form onSubmit={handleContinue} className="space-y-4">
             <Input
@@ -119,7 +118,7 @@ export default function WelcomeScreen() {
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground mb-6">
-          Please enter your email to continue. We'll send a magic link to sign in.
+          Please enter your email to continue. We&apos;ll send a magic link to sign in.
         </p>
         <form onSubmit={handleContinue} className="space-y-4">
           <Input
@@ -142,3 +141,4 @@ export default function WelcomeScreen() {
     </Card>
   );
 }
+
